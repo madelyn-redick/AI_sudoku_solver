@@ -7,14 +7,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import time
+import random
 
 
-
-def get_structure(full_arr, structure, idx, sg_idx=0):
+def get_structure(puzzle, structure, idx, sg_idx=0):
     """ returns a row, column, or subgrid at given index(es)
 
     Args:
-        full_arr (numpy.ndarray): 9x9 puzzle
+        puzzle (numpy.ndarray): 9x9 puzzle
         structure (string): row, column, or subgrid
         idx (int): starting index of structure
         sg_idx (int): y index of subgrid, optional, default=0
@@ -22,26 +22,29 @@ def get_structure(full_arr, structure, idx, sg_idx=0):
     Returns:
         arr (numpy.ndarray): desired structure type at given index(es) of shape (9,)
     """
-    # TODO DATA VALIDTION
     if structure == "row":
-        arr = full_arr[idx]
+        arr = puzzle[idx]
     elif structure == "column":
-        arr = full_arr[:, idx]
+        arr = puzzle[:, idx]
     elif structure == "subgrid":
         sub_x, sub_y = get_subgrid_coordinates(idx, sg_idx)
-        arr = np.array(list(full_arr[sub_x][sub_y:sub_y+3]) + list(full_arr[sub_x+1][sub_y:sub_y+3]) + list(full_arr[sub_x+2][sub_y:sub_y+3]))
+        arr = np.array(list(puzzle[sub_x][sub_y:sub_y+3]) + list(puzzle[sub_x+1][sub_y:sub_y+3]) + list(puzzle[sub_x+2][sub_y:sub_y+3]))
 
     return arr
+
+def count_zeros(puzzle): #TODO USE THIS ELSEWHERE
+    return np.count_nonzero(puzzle == 0)
 
 def get_subgrid_coordinates(x, y):
     """ get coordinates of top left cell of the subgrid containing cell (x, y)
 
     Args:
-        x (_type_): _description_
-        y (_type_): _description_
+        x (int): row index, value between 0 and 8 inclusive
+        y (int): column index, value between 0 and 8 inclusive
 
     Returns:
-        _type_: _description_ TODO
+        sub_x (int): row index of top left cell of subgrid
+        sub_y (int): column index of top left cell of subgrid
     """
     if x <= 2:
         sub_x = 0
@@ -59,37 +62,45 @@ def get_subgrid_coordinates(x, y):
 
     return sub_x, sub_y
 
-def get_replacement_indexes(full_arr):
+def get_replacement_indexes(puzzle):
+    """ get locations of non pre-filled cells
+
+    Args:
+        puzzle (numpy.ndarray): 9x9 puzzle
+
+    Returns:
+        replace (list): tuples of (row, column) indexes that are able to be filled
+    """
     replace = []
     for i in range(9):
         for j in range(9):
-            if full_arr[i][j] == 0:
+            if puzzle[i][j] == 0:
                 replace.append((i, j))
     return replace
 
-def replace_structure(full_array, sub_array, structure, idx, sg_idx=0):
+def replace_structure(puzzle, arr, structure, idx, sg_idx=0):
     """ replaces a partially solved row/column/subgrid with its original
 
     Args:
-        full_array (numpy.ndarray): 9x9 puzzle
+        puzzle (numpy.ndarray): 9x9 puzzle
         sub_array (numpy.ndarray): row/column/subgrid of a puzzle
         structure (string): row, column, or subgrid
         idx (int): starting index of structure
         sg_idx (int): y index of subgrid, optional, default=0
 
     Returns:
-        full_array: partially filled 9x9 puzzle 
+        puzzle: partially filled 9x9 puzzle 
     """
     if structure == "row":
-        full_array[idx] = sub_array
+        puzzle[idx] = arr
     elif structure == "column":
-        full_array[:, idx] = sub_array
+        puzzle[:, idx] = arr
     elif structure == "subgrid":
-        full_array[idx][sg_idx:sg_idx+3] = sub_array[:3]
-        full_array[idx+1][sg_idx:sg_idx+3] = sub_array[3:6]
-        full_array[idx+2][sg_idx:sg_idx+3] = sub_array[6:]
+        puzzle[idx][sg_idx:sg_idx+3] = arr[:3]
+        puzzle[idx+1][sg_idx:sg_idx+3] = arr[3:6]
+        puzzle[idx+2][sg_idx:sg_idx+3] = arr[6:]
 
-    return full_array
+    return puzzle
 
 def get_remaining_values(arr):
     """ finds values not already present in the row/column/subgrid
@@ -107,9 +118,57 @@ def get_remaining_values(arr):
 
     return np.array(rem_vals)
 
+def get_valid_rep_values(puzzle, x, y, structure):
+    """ find values not in a cell's row, column, and subgrid
+
+    Args:
+        puzzle (numpy.ndarray): 9x9 puzzle
+        x (int): row index, value between 0 and 8 inclusive
+        y (int): column index, value between 0 and 8 inclusive
+        structure (string): row, column, or subgrid
+
+    Returns:
+        valid_values (list): integers that can be placed in (x, y) without violating puzzle constraints
+    """
+    # get corresponding row/column/subgrid arr
+    if structure == "subgrid":
+        arr = get_structure(puzzle, "subgrid", x, y)
+        corr_arr_1 = get_structure(puzzle, "row", x)
+        corr_arr_2 = get_structure(puzzle, "column", y)
+    else:
+        corr_arr_1 = get_structure(puzzle, "subgrid", x, y)
+        if structure == "row":
+            arr = get_structure(puzzle, "row", x)
+            corr_arr_2 = get_structure(puzzle, "column", y)
+        else:
+            arr = get_structure(puzzle, "column", y)
+            corr_arr_2 = get_structure(puzzle, "row", x)
+
+    # get remaining values in structure
+    struct_rem_vals = get_remaining_values(arr)
+    
+    # get valid values to replace
+    valid_values = []
+    for value in struct_rem_vals:
+        if value not in corr_arr_1 and value not in corr_arr_2:
+            valid_values.append(value)
+
+    return valid_values #TODO USE THIS IN strat_fill_remaining_vals
+
 def get_accuracy(unsolved, solved, generated_sol, percentage=True):
-    # check how many generated values were correctly placed
-    # TODO
+    """ calculates number of correctly placed values out of number of non pre-filled values
+
+    Args:
+        unsolved (numpy.ndarray): 9x9 unsolved puzzle
+        solved (numpy.ndarray): 9x9 solved puzzle
+        generated_sol (numpy.ndarray): 9x9 generated solution of unsolved puzzle
+        percentage (bool, optional): True if you want the ratio returned, False if 
+            you want the full breakdown dictoinary, defaults to True
+
+    Returns:
+        totals["correct"]/len(to_fill) (float): if percentage==True, ratio of correctly placed values to all replaceable cells
+        totals (dictionary): if percentage==False, frequencies of correctly placed, incorrectly placed, and empty cells
+    """
 
     # get indexes of values to be filled
     to_fill = get_replacement_indexes(unsolved)
@@ -129,19 +188,37 @@ def get_accuracy(unsolved, solved, generated_sol, percentage=True):
     return totals
 
 def compare_parameters(to_solve, solved, population_sizes, generations):
-    #TODO
+    """ produces a dictionary containing information to plot results of genetic algorithm with different parameters
+    TODO IS THIS NEEDED
+    Args:
+        to_solve (numpy.ndarray): 9x9 unsolved puzzle
+        solved (numpy.ndarray): 9x9 solved puzzle
+        population_sizes (list): integers, population sizes 
+        generations (list): integers, numbers of generations
+
+    Returns:
+        results (dictionary): information to plot results of genetic algorithm with different parameters
+    """
     results = {}
     for evolution in range(len(population_sizes)):
+
+        # get population size and number of generations
         pop_size = population_sizes[evolution]
         gen_size = generations[evolution]
-        sol, fitness_score, time = genetic_algorithm(to_solve, solved, pop_size, gen_size)
+
+        # run genetic algorithm
+        sol, fitness_score, time, zeros, gens = genetic_algorithm(to_solve, solved, pop_size, gen_size)
+
+        # calculate accuracy
         accuracy = get_accuracy(to_solve, solved, sol)
-        results[evolution] = {"solution":sol, "fitness_score":fitness_score, "accuracy":accuracy, "pop_size":pop_size, "gen_size":gen_size, "seconds":time}
+
+        # consolidate results
+        results[evolution] = {"solution":sol, "fitness_score":fitness_score, "accuracy":accuracy, "pop_size":pop_size, "gen_size":gen_size, "seconds":time, "zeros":zeros, "gens":gens}
 
     return results
 
 def plot_compare_parameters(results):
-    #TODO
+    #TODO IS THIS NEEDED
     # Extract everything with their keys
     evolution_ids = list(results.keys())
     fitness_scores = [results[k]["fitness_score"] for k in evolution_ids]
@@ -174,49 +251,100 @@ def plot_compare_parameters(results):
     plt.tight_layout()
     plt.savefig("acc_fit_vs_pop_gen.png")
 
-def compare_puzzles(indexes, all_unsolved, all_solved, population_size, generations, hills):
+def difficulty_level(puzzle):
+    """ returns difficulty level based on number of initial zeros
+
+    Args:
+        puzzle (numpy.ndarray): 9x9 unsolved puzzle
+    
+    Returns:
+        difficulty (str): easy, medium, or hard
+    """
+    if count_zeros(puzzle) < 30:
+        return "Easy"
+    elif count_zeros(puzzle) < 42:
+        return "Medium"
+    else:
+        return "Hard"
+
+def compare_puzzles(indexes, all_unsolved, all_solved, population_size, generations, mutations, hills):
+    """ produces a dictionary containing information to plot results of genetic algorithm with different parameters/puzzles
+
+    Args:
+        indexes (list): integers representing indexes of desired puzzles
+        all_unsolved (pandas.DataFrame): all unsolved puzzles
+        all_solved (pandas.DataFrame): all solved puzzles
+        population_size (list): integers, population sizes 
+        generations (list): integers, numbers of generations  
+        mutations (list): booleans, represent if genetic algorithm will contain mutations
+        hills (list): booleans, represent if genetic algorithm will contain hill climbing
+
+    Returns:
+        results (dictionary): information to plot results of genetic algorithm with different parameters/puzzles
+    """
     results = {}
     pop_gen_idx = 0
-    for idx in indexes:
-        to_solve = all_unsolved[idx]
-        solved = all_solved[idx]
-        sol, fitness_score, time = genetic_algorithm(to_solve, solved, population_size[pop_gen_idx], generations[pop_gen_idx], hills[pop_gen_idx])
+    for idx in range(len(indexes)):
+        to_solve = all_unsolved[indexes[idx]]
+        solved = all_solved[indexes[idx]]
+        sol, fitness_score, time, zeros, gens = genetic_algorithm(to_solve, solved, population_size[pop_gen_idx], generations[pop_gen_idx], mutate=mutations[pop_gen_idx], hill_climbing=hills[pop_gen_idx])
         accuracy = get_accuracy(to_solve, solved, sol)
-        results[idx] = {"solution":sol, "fitness_score":fitness_score, "accuracy":accuracy, "pop_size":population_size[pop_gen_idx], "gen_size":generations[pop_gen_idx], "seconds":time}
+        results[idx] = {"puzzle_id":indexes[idx], "gen_solution":sol, "fitness_score":fitness_score, "accuracy":accuracy, "pop_size":population_size[pop_gen_idx], 
+                        "gen_size":generations[pop_gen_idx], "seconds":time, "mutation":mutations[pop_gen_idx], 
+                        "hill_climbing": hills[pop_gen_idx], "unsolved":to_solve, "true_solution":solved, "difficulty":difficulty_level(to_solve), "gens":gens}
         pop_gen_idx += 1
     return results
 
 def draw_grid(ax, grid, title):
-            ax.set_title(title)
-            ax.set_xlim(0, 9)
-            ax.set_ylim(0, 9)
-            ax.invert_yaxis()
-            ax.set_xticks(np.arange(0, 10, 1))
-            ax.set_yticks(np.arange(0, 10, 1))
-            ax.tick_params(axis='both', which='both', bottom=False, left=False, labelbottom=False, labelleft=False)
-            ax.set_aspect('equal')
+    """ creates grid to plot Sudoku puzzles in
 
-            # Draw thin grid
-            for x in range(10):
-                lw = 2 if x in [0, 3, 6, 9] else 1
-                ax.axvline(x, color='black', linewidth=lw)
-                ax.axhline(x, color='black', linewidth=lw)
+    Args:
+        ax (_type_): _description_
+        grid (_type_): _description_ TODO
+        title (_type_): _description_
+    """
+    ax.set_title(title)
+    ax.set_xlim(0, 9)
+    ax.set_ylim(0, 9)
+    ax.invert_yaxis()
+    ax.set_xticks(np.arange(0, 10, 1))
+    ax.set_yticks(np.arange(0, 10, 1))
+    ax.tick_params(axis='both', which='both', bottom=False, left=False, labelbottom=False, labelleft=False)
+    ax.set_aspect('equal')
+
+    # thin grid
+    for x in range(10):
+        lw = 2 if x in [0, 3, 6, 9] else 1
+        ax.axvline(x, color='black', linewidth=lw)
+        ax.axhline(x, color='black', linewidth=lw)
             
-            # Plot numbers
-            for row in range(9):
-                for col in range(9):
-                    ax.text(col + 0.5, row + 0.5, str(grid[row, col]),
+    # plot numbers
+    for row in range(9):
+        for col in range(9):
+            ax.text(col + 0.5, row + 0.5, str(grid[row, col]),
                             ha='center', va='center', fontsize=10, color='black')
                     
 def plot_compare_puzzles(results, unsolved, solved, fig_title="compare_puzzles"):
-    # Extract everything with their keys
-    indexes = list(results.keys())
-    gen_solution = [results[k]["solution"] for k in indexes]
-    accuracies = [results[k]["accuracy"] for k in indexes]
-    fitness_scores = [results[k]["fitness_score"] for k in indexes]
-    pop_sizes = [results[k]["pop_size"] for k in indexes]
-    generations = [results[k]["gen_size"] for k in indexes]
-    times = [results[k]["seconds"] for k in indexes]
+    """ creates a plot comparing metrics of genetic algorithm, generated solution, and actual solution
+    TODO REMOVE UNSOLVED AND SOLVED FROM PARAMETERS AND ANY OTHER CALL TO THIS FUNCTION
+    Args:
+        results (dictoinary): information to plot results of genetic algorithm with different parameters/puzzles
+        fig_title (str, optional): name of produced figure, defaults to "compare_puzzles"
+    """
+    # extract information to their own lists
+    keys = list(results.keys())
+    indexes = [results[k]["puzzle_id"] for k in keys]
+    gen_solution = [results[k]["gen_solution"] for k in keys]
+    accuracies = [results[k]["accuracy"] for k in keys]
+    fitness_scores = [results[k]["fitness_score"] for k in keys]
+    pop_sizes = [results[k]["pop_size"] for k in keys]
+    times = [results[k]["seconds"] for k in keys]
+    hill_climbing = [results[k]["hill_climbing"] for k in keys]
+    true_solutions = [results[k]["true_solution"] for k in keys]
+    unsolved_puzzles = [results[k]["unsolved"] for k in keys]
+    mutations = [results[k]["mutation"] for k in keys]
+    diff = [results[k]["difficulty"] for k in keys]
+    gens = [results[k]["gens"] for k in keys]
 
     # set up figure and grids
     num_plots = len(indexes)
@@ -229,11 +357,14 @@ def plot_compare_puzzles(results, unsolved, solved, fig_title="compare_puzzles")
         ax_text.axis('off')
         metrics_text = (
             f"Puzzle Index: {indexes[i]}\n"
-            f"Accuracy: {accuracies[i]:.3f}\n"
-            f"Fitness Score: {fitness_scores[i]:.3f}\n"
+            f"Difficulty: {diff[i]}\n"
+            f"Accuracy: {accuracies[i]*100:.2f}\n"
+            f"Fitness Score: {fitness_scores[i]:.2f}\n"
             f"Population Size: {pop_sizes[i]}\n"
-            f"Num Generations: {generations[i]}\n"
-            f"Runtime: {times[i]:.3f} seconds"
+            f"Generations: {gens[i]}\n"
+            f"Hill Climbing: {hill_climbing[i]}\n"
+            f"Mutations: {mutations[i]}\n"
+            f"Runtime: {times[i]:.2f} seconds"
         )
         ax_text.text(0, 0.5, metrics_text, ha='left', va='center', fontsize=12,
                      bbox=dict(facecolor='white', edgecolor='black', boxstyle='round'))
@@ -241,8 +372,8 @@ def plot_compare_puzzles(results, unsolved, solved, fig_title="compare_puzzles")
         # middle grid
         ax_gen = fig.add_subplot(gs[i, 1])
         gen_grid = gen_solution[i]
-        unsolved_grid = unsolved[i]
-        solved_grid = solved[i]
+        unsolved_grid = unsolved_puzzles[i]
+        solved_grid = true_solutions[i]
         generated_vals = get_replacement_indexes(unsolved_grid)
         ax_gen.set_title("Generated Solution")
         ax_gen.set_xlim(0, 9)
@@ -264,11 +395,11 @@ def plot_compare_puzzles(results, unsolved, solved, fig_title="compare_puzzles")
                 val = gen_grid[row, col]
                 if (row, col) in generated_vals:
                     if val == 0:
-                        color = "#4d83db"
+                        color = "#4d83db" # blue
                     elif val != solved_grid[row, col]:
                         color = "red"
                     else:
-                        color = "#0aa105"
+                        color = "#0aa105" # green
                 else:
                     color = "black"
                 ax_gen.text(col + 0.5, row + 0.5, str(val), ha='center', va='center', fontsize=10, color=color)
@@ -320,16 +451,17 @@ def num_empty_cells(arr):
     zeros = [x for x in arr if x==0]
     return len(zeros)
 
-def get_fitness(generated_sol, weights=[0.8, 0.4]):
+def get_fitness(generated_sol, weights=[1.2, 0.6]):
     """ calculates weighted fitness score for a puzzle
 
     Args:
-        full_arr (numpy.ndarray): 9x9 puzzle TODO
+        generated_sol (numpy.ndarray): 9x9 generated puzzle solutions
         weights (list, optional): first value is the weight for number of repeats, 
-            second is weight for number of empty cells. defaults to [0.8, 0.4]
+            second is weight for number of empty cells. defaults to [1.2, 0.6]
 
     Returns:
-        fitness (float): score representing how "good" a solution to a puzzle is. lower values mean more fit
+        fitness (float): score representing how "good" a solution to a puzzle is, 
+            lower values mean more fit
     """
 
     # get number of repeats in rows, columns, and subgrids
@@ -362,6 +494,60 @@ def get_fitness(generated_sol, weights=[0.8, 0.4]):
 
     return fitness
 
+def get_fitness_structure(arr, weights=[1.2, 0.6]):
+    """ calculates weighted fitness score for a puzzle
+
+    Args:
+        arr (numpy.ndarray): represents row/column/subgrid of a puzzle
+        weights (list, optional): first value is the weight for number of repeats, 
+            second is weight for number of empty cells, defaults to [1.2, 0.6]
+
+    Returns:
+        fitness (float): score representing how "good" a solution to a puzzle is. lower values mean more fit
+    """
+
+    # num_repeats
+    repeats = num_repeats(arr)[0]
+
+    # empty cells
+    empties  = num_empty_cells(arr)
+
+    # calculate fitness score
+    fitness = weights[0]*repeats + weights[1]*empties
+
+    return fitness
+
+def least_fit_structures(puzzle):
+    """ finds the least fit row, column, and subgrid of a given puzzle
+
+    Args:
+        puzzle (numpy.ndarray): 9x9 puzzle
+
+    Returns:
+        least_fit (dictionary): contains index of least fit row/column/subgrid and their fitness scores
+    """
+    least_fit = {"row":0, "row_fitness":0, "column":0, "column_fitness":0, "subgrid":(0, 0), "subgrid_fitness":0}
+    
+    for structure in ["row", "column"]:
+        for i in range(9):
+            struct = get_structure(puzzle, structure, i)
+            fitness = get_fitness_structure(struct)
+            if least_fit[f"{structure}_fitness"] < fitness:
+                least_fit[structure] = i
+                least_fit[f"{structure}_fitness"] = fitness
+
+    structure = "subgrid"
+    for c in [0, 3, 6]:
+        for r in [0, 3, 6]:
+            subgrid = get_structure(puzzle, structure, c, r)
+            fitness = get_fitness_structure(subgrid)
+            if least_fit[f"{structure}_fitness"] < fitness:
+                least_fit[structure] = (c, r)
+                least_fit[f"{structure}_fitness"] = fitness
+
+    return least_fit
+    
+
 ### FILLING METHODS
 def strat_fill_remaining_vals(full_arr, structure, idx, sg_idx=0):
     """ strategically fill in remaining values in empty cells only if those values 
@@ -392,7 +578,6 @@ def strat_fill_remaining_vals(full_arr, structure, idx, sg_idx=0):
 
         if invalid_placement_attempt > len(rem_vals)+10:
             break
-            # TODO THIS BREAK STRATEGY COULD PREMATURELY STOP THE LOOP
     
         # choose random remaining value
         rand_remaining = int(np.random.choice(rem_vals))
@@ -427,17 +612,17 @@ def strat_fill_remaining_vals(full_arr, structure, idx, sg_idx=0):
     return arr
 
 ## GENETIC ALGORITHM
-def initialize_candidate(full_array):
+def initialize_candidate(puzzle):
     """ use filling method(s) to fill in empty values of an unsolved puzzle
 
     Args:
-        full_arr (numpy.ndarray): 9x9 puzzle, no empty values filled
+        puzzle (numpy.ndarray): 9x9 puzzle, no empty values filled
     
     Returns:
         full_arr (numpy.ndarray): 9x9 puzzle, some/most empty values filled
     """
     # copy input
-    full_arr = np.copy(full_array)
+    full_arr = np.copy(puzzle)
 
     # randomly choose between filling rows, columns, or grids
     options = ["row", "column", "subgrid"]
@@ -467,9 +652,18 @@ def initialize_candidate(full_array):
                     full_arr = replace_structure(full_arr, filled, structure, i, j)
     return full_arr
 
-def selection(population, fitness_scores, num_select=5):
-    """ chooses most fit variations of a puzzle TODO
+def selection(population, fitness_scores, num_select=15):
+    """ chooses most fit variations of a puzzle
+
+    Args:
+        population (list): generated solutions for a puzzle
+        fitness_scores (list): fitness scores for generated solutions
+        num_select (int, optional): number of populations to save, defaults to 15
+
+    Returns:
+        result_dict (dictionary): top num_select populations with best fitness score
     """
+
     # combine population with fitness scires
     pop_scores = {}
     for i, (arr, num) in enumerate(zip(population, fitness_scores)):
@@ -492,6 +686,14 @@ def selection(population, fitness_scores, num_select=5):
     return result_dict
 
 def pair_parents(parents):
+    """ create pairings of parents to be bred
+
+    Args:
+        parents (list): generated solutions for a puzzle
+
+    Returns:
+        pairs (list): list of tuples of pairs of generated solutions
+    """
     # create pairings of parents to be bred
     pairs = []
     for parent1 in parents:
@@ -501,6 +703,15 @@ def pair_parents(parents):
     return pairs
 
 def crossover_structure(parent1, parent2):
+    """ swaps rows/columns/subgrids of two generated solutions to a puzzle
+
+    Args:
+        parent1 (numpy.ndarray): 9x9 generated solution to a puzzle
+        parent2 (numpy.ndarray): 9x9 generated solution to a puzzle
+
+    Returns:
+        parent1 (): 
+    """
     # randomly choose row or column TODO ADD SUBGRID
     structure = np.random.choice(["row", "column"])
 
@@ -552,11 +763,18 @@ def gen_hill_neighbors(puzzle, to_fill, num_neighbors=15):
     # check which have been filled
     # TODO - DO I CHANGE ONE VALUE THAT HAS ALREADY BEEN GENERATED OR FOCUS ON FILLING 0s
     # currently, replacing any random value
+    # If there are no cells to fill, simply return the original puzzle
+    if len(to_fill) == 0:
+        return [puzzle]
+    
     neighbors = [puzzle]
 
     # randomly choose non-preset value to replace
     for i in range(num_neighbors):
-        idx = np.random.choice(len(to_fill)-1)
+        if len(to_fill) == 1:
+            idx = 0
+        else:
+            idx = np.random.choice(range(len(to_fill)))
         x, y = to_fill[idx]
 
         # get available values to replace this cell with
@@ -575,7 +793,7 @@ def gen_hill_neighbors(puzzle, to_fill, num_neighbors=15):
 
 def hill_climb(generated_sol, max_iters=1000, num_neighbors=50):
     current = generated_sol
-    current_fitness = get_fitness(current)  # Your fitness function
+    current_fitness = get_fitness(current)  
     iteration = 0
 
     while iteration < max_iters:
@@ -603,19 +821,77 @@ def hill_climb(generated_sol, max_iters=1000, num_neighbors=50):
 
     return current
 
+def mutation(puzzle, replacement_indexes):
+    #TODO
 
-"""def all_arrays_equal(arr_list):
-    if not arr_list: TODO
-        return True  # empty list is trivially "equal"
+    # get least fit structures of the whole puzzle
+    least_fit = least_fit_structures(puzzle)
 
-    first = arr_list[0]
-    return all(np.array_equal(first, arr) for arr in arr_list[1:])"""
+    # UNFIT ROWS
+    replace_rows = [item for item in replacement_indexes if least_fit["row"] == item[0]]
+
+    # randomly select number of values to replace
+    if len(replace_rows) >= 1:
+        if len(replace_rows) == 1:
+            num_replacements = 1
+        elif len(replace_rows) > 1:
+            num_replacements = np.random.choice(range(1, len(replace_rows)))
+
+        # randomly choose num_replacements indexes to replace
+        ind_to_replace = random.sample(replace_rows, num_replacements)
+
+        # for each, get valid values, replace
+        for loc in range(len(ind_to_replace)):
+            x, y = ind_to_replace[loc]
+            
+            # get valid replacement values
+            valid_values = get_valid_rep_values(puzzle, x, y, "row")
+
+            # randomly choose one
+            if len(valid_values) > 0:
+                puzzle[x][y] = random.sample(valid_values, 1)[0]
+
+    # UNFIT COLUMNS
+    replace_cols = [item for item in replacement_indexes if least_fit["column"] == item[1]]
+    if len(replace_cols) >= 1:
+        if len(replace_cols) == 1:
+            num_replacements = 1
+        elif len(replace_cols) > 1:
+            num_replacements = np.random.choice(range(1, len(replace_cols)))
+        ind_to_replace = random.sample(replace_cols, num_replacements)
+        for loc in range(len(ind_to_replace)):
+            x, y = ind_to_replace[loc]
+            valid_values = get_valid_rep_values(puzzle, x, y, "column")
+            if len(valid_values) > 0:
+                puzzle[x][y] = random.sample(valid_values, 1)[0]
+
+    # UNFIT SUBGRIDS
+    subgrid_x = least_fit["subgrid"][0]
+    subgrid_y = least_fit["subgrid"][1]
+    subgrid_replace_inds = [(subgrid_x, subgrid_y), (subgrid_x, subgrid_y+1), (subgrid_x, subgrid_y+2),
+                            (subgrid_x+1, subgrid_y), (subgrid_x+1, subgrid_y+1), (subgrid_x+1, subgrid_y+2),
+                            (subgrid_x+2, subgrid_y), (subgrid_x+2, subgrid_y+1), (subgrid_x+2, subgrid_y+2)]
+    replace_subgrid = [value for value in subgrid_replace_inds if value in replacement_indexes]
+    if len(replace_subgrid) >= 1:
+        if len(replace_subgrid) == 1:
+            num_replacements = 1
+        elif len(replace_subgrid) > 1:
+            num_replacements = np.random.choice(range(1, len(replace_subgrid)))
+        ind_to_replace = random.sample(replace_subgrid, num_replacements)
+        for loc in range(len(ind_to_replace)):
+            x, y = ind_to_replace[loc]
+            valid_values = get_valid_rep_values(puzzle, x, y, "subgrid")
+            if len(valid_values) > 0:
+                puzzle[x][y] = random.sample(valid_values, 1)[0]
+
+    return puzzle
 
 
-def genetic_algorithm(unsolved, solved, population_size, generations, mutation_rate=0, hill_climbing=False, hill_iter=1000, num_neighbors=50):
+def genetic_algorithm(unsolved, solved, population_size, generations, mutate=False, hill_climbing=False, hill_iter=2000, num_neighbors=150):
     #TODO
     start = time.time()
     dELETE_TODO = 1
+    replacement_indexes = get_replacement_indexes(unsolved)
 
     # create population of solutions for one puzzle
     population = []
@@ -640,7 +916,8 @@ def genetic_algorithm(unsolved, solved, population_size, generations, mutation_r
         # check for perfect solution
         if 0 in fitness_scores:
             solution = population[fitness_scores.index(0)]
-            return solution, gen
+            end = time.time()
+            return solution, gen, end-start, count_zeros(unsolved), f"{gen+1}/{generations}"
     
         # choose most fit populations (top 30%)
         parents = selection(population, fitness_scores, int(population_size*0.3))
@@ -653,8 +930,9 @@ def genetic_algorithm(unsolved, solved, population_size, generations, mutation_r
             child1, child2 = crossover_structure(parent1, parent2)
             offspring.extend([child1, child2])
 
-        # randomly mutate TODO
-        #offspring = [mutation(child, mutation_rate) for child in offspring]
+        # randomly mutate 
+        if mutate:
+            offspring = [mutation(child, replacement_indexes) for child in offspring]
         
         # form new generation
         if len(population) > 1:
@@ -665,13 +943,16 @@ def genetic_algorithm(unsolved, solved, population_size, generations, mutation_r
         dELETE_TODO += 1
 
     # return the best candidate found
-    # TODO RUN HILL CLIMBING AGAIN?
+
+    # run hill climbing on each candidate
+    if hill_climbing:
+        population = [hill_climb(candidate, hill_iter, num_neighbors) for candidate in population]
     best_sol_val = selection(population, fitness_scores, 1)[0]
     best_solution = best_sol_val["array"]
     best_fitness_score = best_sol_val["value"]
     end = time.time()
     print() #TODO
-    return best_solution, best_fitness_score, end-start
+    return best_solution, best_fitness_score, end-start, count_zeros(unsolved), f"{gen+1}/{generations}"
     
 
 
@@ -687,129 +968,86 @@ def main():
     puzzles = transformed["puzzle"]
     solutions = transformed["solution"]
 
+    # get easy, medium, and hard puzzles
+    easy_ind = []
+    medium_ind = []
+    hard_ind = []
+    for i in range(len(puzzles)):
+        if count_zeros(puzzles[i]) < 30:
+            easy_ind.append(i)
+        elif count_zeros(puzzles[i]) < 42:
+            medium_ind.append(i)
+        else:
+            hard_ind.append(i)
 
-    # testing TODO
-    """x = np.arange(100, 251, 10)  
-    y_direct = x.copy()
-    np.random.seed(42)
-    y_random = np.random.permutation(x)
-    population_sizes = np.concatenate([x, x])          
-    generations = np.concatenate([y_direct, y_random])  
-    puzzle = puzzles[5]
-    solution = solutions[5]
-    results = compare_parameters(puzzle, solution, population_sizes, generations)
-    plot_compare_parameters(results)"""
-    # choose 10 random puzzles to solve
-    # define population and generation sizes
-    indexes = [0, 2]    
-    pop_sizes = [5, 7]
-    gens = [3, 7]
-    #arr = get_structure(puzzles[0], "row", 0)
-    #print(get_remaining_values(arr))
-    generated_vals = [[(0, 0), (0, 1), (8, 0), (8, 8)], [(0, 0), (0, 1), (8, 0), (8, 8)], [(0, 0), (0, 1), (8, 0), (8, 8)], [(0, 0), (0, 1), (8, 0), (8, 8)], [(0, 0), (0, 1), (8, 0), (8, 8)], [(0, 0), (0, 1), (8, 0), (8, 8)], [(0, 0), (0, 1), (8, 0), (8, 8)]]
-    test = puzzles[0]
-    #print(test)
+    # mutation vs no mutation
+    mutate = [False, False, True, True]
+    hills = [True, True, True, True]
+    generations = [350, 350, 350, 350]
+    pop_sizes = [150, 150, 150, 150]
 
-    #results = compare_puzzles(indexes, puzzles, solutions, pop_sizes, gens)
-    #plot_compare_puzzles(results, puzzles, solutions, fig_title="test_compare_puzzles")
-    #print(len(pop_sizes))
-    # create population
-    """population = [] # list of numpy arrays
-    for _ in range(3):
-        candidate = initialize_candidate(test)
-        if isinstance(candidate, np.ndarray):
-            population.append(candidate)
-    print(population)
-    print()"""
+    # randomly choose 4 of each type
+    selected_easy = list(np.random.choice(easy_ind, size=4, replace=False))
+    selected_medium = list(np.random.choice(medium_ind, size=4, replace=False))
+    selected_hard = list(np.random.choice(hard_ind, size=4, replace=False))
 
-    indexes = [10, 10]
-    pop_sizes = [10]#[150, 150]
-    gens = [10] #[125, 125]
-    hills = [False, True]
-    pop_gen_idx = 0
-    unsolved = puzzles[indexes[pop_gen_idx]]
-    solved = solutions[indexes[pop_gen_idx]]
-    sol, fitness_score, time = genetic_algorithm(unsolved, solved, pop_sizes[pop_gen_idx], gens[pop_gen_idx], hill_climbing=hills[pop_gen_idx])
-    print("RESUTLS:")
-    print("unsolved:")
-    print(unsolved)
-    print("solved:")
-    print(solved)
-    print("generated solution:")
-    print(sol)
-    print("fitness:", fitness_score)
-    print("time:", time)
-    print("accuracy:", get_accuracy(unsolved, solved, sol))
-    #results = compare_puzzles(indexes, puzzles, solutions, pop_sizes, gens, hills)
-    #plot_compare_puzzles(results, puzzles, solutions, fig_title="no_hill_VS_hill")
+    # run comparisons
+    mutation_easy_results = compare_puzzles(selected_easy, puzzles, solutions, pop_sizes, generations, mutations=mutate, hills=hills)
+    plot_compare_puzzles(mutation_easy_results, puzzles, solutions, fig_title="mutation_comparison_EASY")
+
+    mutation_med_results = compare_puzzles(selected_medium, puzzles, solutions, pop_sizes, generations, mutations=mutate, hills=hills)
+    plot_compare_puzzles(mutation_med_results, puzzles, solutions, fig_title="mutation_comparison_MEDIUM")
+
+    mutation_hard_results = compare_puzzles(selected_hard, puzzles, solutions, pop_sizes, generations, mutations=mutate, hills=hills)
+    plot_compare_puzzles(mutation_hard_results, puzzles, solutions, fig_title="mutation_comparison_HARD")
 
 
 
-# TODO - ACCURACY SHOULD NOT BE INCLUDED IN FITNESS CALCULATION
+    # hill climbing vs no hill climbing
+    hills = [False, False, True, True]
+    mutate = [True, True, True, True]
+
+    # randomly choose 4 of each type
+    selected_easy = list(np.random.choice(easy_ind, size=4, replace=False))
+    selected_medium = list(np.random.choice(medium_ind, size=4, replace=False))
+    selected_hard = list(np.random.choice(hard_ind, size=4, replace=False))
+
+    # run comparisons
+    hill_easy_results = compare_puzzles(selected_easy, puzzles, solutions, pop_sizes, generations, mutations=mutate, hills=hills)
+    plot_compare_puzzles(hill_easy_results, puzzles, solutions, fig_title="hill_comparison_EASY")
+
+    hill_med_results = compare_puzzles(selected_medium, puzzles, solutions, pop_sizes, generations, mutations=mutate, hills=hills)
+    plot_compare_puzzles(hill_med_results, puzzles, solutions, fig_title="hill_comparison_MEDIUM")
+
+    hill_hard_results = compare_puzzles(selected_hard, puzzles, solutions, pop_sizes, generations, mutations=mutate, hills=hills)
+    plot_compare_puzzles(hill_hard_results, puzzles, solutions, fig_title="hill_comparison_HARD")
 
 
-    """NEXT STEPS
-X Representation of the Candidate Solution
-    use strat_fill_remaining_vals to fill a whole puzzle
 
-X Fitness Function Design
-    Use your num_repeats function to count duplicates per row/column/subgrid.
-    Optionally incorporate num_empty_cells if using a representation that can leave some cells unfilled.
-    Define an overall fitness score (lower is better) that aggregates these penalties.
+    # same parameters, diff puzzles
+    mutate = [True, True, True]
+    hills = [True, True, True]
+    generations = [350, 350, 350]
+    pop_sizes = [150, 150, 150]
 
-X Initial Population Generation
-    steps:
-        Loop over the number of individuals in your desired population.
-        For each, copy the initial puzzle.
-        Apply a fill method (e.g., your strategic filling function) that respects fixed values and randomly fills the rest.
-        Outcome: A diverse set of candidate solutions to begin the evolutionary process.
+    # randomly choose 3 of each type
+    selected_easy = list(np.random.choice(easy_ind, size=3, replace=False))
+    selected_medium = list(np.random.choice(medium_ind, size=3, replace=False))
+    selected_hard = list(np.random.choice(hard_ind, size=3, replace=False))
 
-X Selection Mechanism
-    Choose parents for reproduction based on fitness
-    Tournament Selection: Randomly pick a subset of individuals and choose the best among them.
-    Roulette Wheel Selection: Assign probabilities proportional to fitness (or inversely, if lower fitness means better)
-    Create a function that takes the population and returns selected parents for crossover.
+    # run comparisons
+    same_params_easy_results = compare_puzzles(selected_easy, puzzles, solutions, pop_sizes, generations, mutations=mutate, hills=hills)
+    plot_compare_puzzles(same_params_easy_results, puzzles, solutions, fig_title="same_params_EASY")
 
-X Crossover (Recombination)
-    Combine parts of two parent solutions to produce offspring.
-    Row/Column/Subgrid Crossover: Exchange entire rows, columns, or subgrids between parents while preserving fixed cells.
-    Block-based Crossover: For example, randomly select a block (a set of contiguous rows) to swap
-    Ensure that the resulting offspring still adhere to the fixed cell constraints.
+    same_params_med_results = compare_puzzles(selected_medium, puzzles, solutions, pop_sizes, generations, mutations=mutate, hills=hills)
+    plot_compare_puzzles(same_params_med_results, puzzles, solutions, fig_title="same_params_MEDIUM")
 
-TODO Mutation
-    Introduce diversity by making small random changes.
-    Randomly select a mutable cell and assign it a new value (from 1 to 9) that does not immediately violate fixed constraints.
-    Alternatively, swap two mutable values in a row, column, or subgrid.
-    Create a mutation function that is applied with a given probability per individual or per cell.
+    same_params_hard_results = compare_puzzles(selected_hard, puzzles, solutions, pop_sizes, generations, mutations=mutate, hills=hills)
+    plot_compare_puzzles(same_params_hard_results, puzzles, solutions, fig_title="same_params_HARD")
 
-X Generation Update 
-    Form a new generation by replacing some or all of the old population with offspring.
-    Consider elitism: retain a few of the best individuals unchanged to ensure good solutions aren’t lost.
-    loop:
-        Evaluate fitness for all individuals.
-        Select parents.
-        Generate offspring through crossover and mutation.
-        Replace or merge populations
+    
 
-X Termination Criteria
-    Decide When to Stop:
-        A solution with a fitness score of zero (no violations) is found.
-        A maximum number of generations or time limit is reached.
-    Monitor if improvements plateau, in which case you might restart or introduce a local search component (Hill Climbing) to refine near-optimal candidates.
 
-Integrating Local Search (Optional Enhancement)
-    Fallback Strategy:
-        If the genetic algorithm stops making progress, use a Hill Climbing algorithm:
-        Apply local mutations that only make changes that improve the fitness.
-        Restart with a different seed if no progress is made after several iterations.
-    Help overcome plateaus or refine solutions that are close to valid.
-
-Parameter Tuning and Evaluation
-    experimentation:
-        Vary population size, mutation rate, crossover strategy, and selection pressure.
-        Compare performance metrics such as convergence speed, success rate (finding a valid solution), and resource (time/memory) consumption.
-    comparison: Benchmark against alternative methods (like CSP-based approaches) to see the trade-offs in complexity and performance across varying puzzle difficulties.
-    """
 
 if __name__ == "__main__":
     main()
